@@ -24,8 +24,7 @@ import java.util.concurrent.Executors
 // the previous track's (same-album tracks on issue #470).
 @UnstableApi
 class SyncBitmapLoader(
-    private val context: Context,
-    private val logger: ((String) -> Unit)? = null
+    private val context: Context
 ) : BitmapLoader {
 
     private val cache = LruCache<Uri, Bitmap>(CACHE_SIZE)
@@ -41,7 +40,6 @@ class SyncBitmapLoader(
                 ?: return Futures.immediateFailedFuture(
                     IOException("BitmapFactory returned null for ${data.size}B")
                 )
-            logger?.invoke("decodeBitmap sync ${data.size}B")
             Futures.immediateFuture(bitmap)
         } catch (e: Exception) {
             Log.w(TAG, "decodeBitmap failed", e)
@@ -51,10 +49,8 @@ class SyncBitmapLoader(
 
     override fun loadBitmap(uri: Uri): ListenableFuture<Bitmap> {
         cache.get(uri)?.let {
-            logger?.invoke("loadBitmap HIT $uri")
             return Futures.immediateFuture(it)
         }
-        logger?.invoke("loadBitmap MISS $uri")
         val future = SettableFuture.create<Bitmap>()
         executor.execute {
             try {
@@ -65,9 +61,7 @@ class SyncBitmapLoader(
                     .get()
                 cache.put(uri, bitmap)
                 future.set(bitmap)
-                logger?.invoke("loadBitmap async DONE $uri")
             } catch (e: Exception) {
-                logger?.invoke("loadBitmap async FAIL $uri: ${e.message}")
                 future.setException(e)
             }
         }
@@ -85,9 +79,7 @@ class SyncBitmapLoader(
                     .submit()
                     .get()
                 cache.put(uri, bitmap)
-                logger?.invoke("prewarm DONE $uri")
-            } catch (e: Exception) {
-                logger?.invoke("prewarm FAIL $uri: ${e.message}")
+            } catch (_: Exception) {
             }
         }
     }

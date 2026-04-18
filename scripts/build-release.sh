@@ -46,7 +46,7 @@ echo ">> Signing with debug keystore"
 echo ">> Verifying signature"
 "$APKSIGNER" verify "$SIGNED" >/dev/null
 
-SIZE="$(du -h "$SIGNED" | cut -f1)"
+SIZE="$(ls -lh "$SIGNED" | awk '{print $5}')"
 echo ""
 echo "Built: $SIGNED ($SIZE)"
 echo "Install: adb install -r \"$SIGNED\""

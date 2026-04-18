@@ -11,7 +11,6 @@ import android.graphics.Bitmap
 import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
-import android.net.Uri
 import android.os.Binder
 import android.os.Bundle
 import android.os.IBinder
@@ -40,12 +39,8 @@ import com.google.common.collect.ImmutableList
 import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
 import java.io.ByteArrayOutputStream
-import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledExecutorService
@@ -98,19 +93,6 @@ open class BaseMediaService : MediaLibraryService() {
     }
 
     private val artworkEmbedExecutor: ExecutorService = Executors.newSingleThreadExecutor()
-
-    private val embedLogFmt = SimpleDateFormat("HH:mm:ss.SSS", Locale.US)
-
-    private fun embedLog(msg: String) {
-        Log.d(TAG, msg)
-        try {
-            val dir = getExternalFilesDir(null) ?: return
-            File(dir, "embed_art.log").appendText(
-                "${embedLogFmt.format(Date())} $msg\n"
-            )
-        } catch (_: Exception) {
-        }
-    }
 
     private val binder = LocalBinder()
 
@@ -169,7 +151,6 @@ open class BaseMediaService : MediaLibraryService() {
         player.addListener(object : Player.Listener {
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
                 Log.d(TAG, "onMediaItemTransition" + player.currentMediaItemIndex)
-                embedLog("onMediaItemTransition idx=${player.currentMediaItemIndex} reason=$reason mediaId=${mediaItem?.mediaId}")
                 if (mediaItem == null) return
 
                 // --- Add for AA : Constants.AA_START_INDEX if présent ---
@@ -215,14 +196,9 @@ open class BaseMediaService : MediaLibraryService() {
             override fun onTimelineChanged(timeline: Timeline, reason: Int) {
                 if (timeline.isEmpty) return
                 val window = Timeline.Window()
-                val urisToWarm = mutableListOf<Uri>()
                 for (i in 0 until timeline.windowCount) {
                     timeline.getWindow(i, window)
-                    window.mediaItem.mediaMetadata.artworkUri?.let { urisToWarm.add(it) }
-                }
-                if (urisToWarm.isNotEmpty()) {
-                    embedLog("prewarm timeline reason=$reason count=${urisToWarm.size}")
-                    urisToWarm.forEach { bitmapLoader.prewarm(it) }
+                    window.mediaItem.mediaMetadata.artworkUri?.let { bitmapLoader.prewarm(it) }
                 }
             }
 
@@ -519,7 +495,7 @@ open class BaseMediaService : MediaLibraryService() {
                 getPendingIntent(0, FLAG_IMMUTABLE or FLAG_UPDATE_CURRENT)
             }
 
-        bitmapLoader = SyncBitmapLoader(applicationContext) { msg -> embedLog(msg) }
+        bitmapLoader = SyncBitmapLoader(applicationContext)
 
         mediaLibrarySession =
             MediaLibrarySession.Builder(this, player, getMediaLibrarySessionCallback())
@@ -746,35 +722,21 @@ open class BaseMediaService : MediaLibraryService() {
     // car Bluetooth stacks (e.g. Tesla) that fail to re-display artwork when two
     // consecutive tracks share the same artworkUri/handle (issue #470).
     private fun embedArtworkForCurrentItem(player: Player, mediaItem: MediaItem) {
-        if (player !is ExoPlayer) {
-            embedLog("skip (not ExoPlayer)")
-            return
-        }
+        if (player !is ExoPlayer) return
 
         val extras = mediaItem.mediaMetadata.extras
-        if (extras?.getString("type") == Constants.MEDIA_TYPE_RADIO) {
-            embedLog("skip (radio)")
-            return
-        }
+        if (extras?.getString("type") == Constants.MEDIA_TYPE_RADIO) return
 
         val coverArtId = extras?.getString("coverArtId")
-        if (coverArtId.isNullOrEmpty()) {
-            embedLog("skip (no coverArtId) mediaId=${mediaItem.mediaId}")
-            return
-        }
+        if (coverArtId.isNullOrEmpty()) return
 
-        if (mediaItem.mediaMetadata.artworkData != null) {
-            embedLog("skip (already embedded) mediaId=${mediaItem.mediaId}")
-            return
-        }
+        if (mediaItem.mediaMetadata.artworkData != null) return
 
         val mediaId = mediaItem.mediaId
-        embedLog("START mediaId=$mediaId coverArtId=$coverArtId")
 
         artworkEmbedExecutor.execute {
             try {
                 val url = CustomGlideRequest.createUrl(coverArtId, ARTWORK_EMBED_SIZE_PX)
-                val t0 = System.currentTimeMillis()
                 val bitmap: Bitmap = Glide.with(applicationContext)
                     .asBitmap()
                     .load(url)
@@ -784,26 +746,13 @@ open class BaseMediaService : MediaLibraryService() {
                 val baos = ByteArrayOutputStream()
                 bitmap.compress(Bitmap.CompressFormat.JPEG, ARTWORK_EMBED_JPEG_QUALITY, baos)
                 val bytes = baos.toByteArray()
-                embedLog("loaded ${bytes.size}B in ${System.currentTimeMillis() - t0}ms for $coverArtId")
 
                 widgetUpdateHandler.post {
                     val curIdx = player.currentMediaItemIndex
-                    if (curIdx == C.INDEX_UNSET) {
-                        embedLog("skip replace (INDEX_UNSET)")
-                        return@post
-                    }
-                    val curItem = player.currentMediaItem ?: run {
-                        embedLog("skip replace (no current item)")
-                        return@post
-                    }
-                    if (curItem.mediaId != mediaId) {
-                        embedLog("skip replace (mediaId changed $mediaId->${curItem.mediaId})")
-                        return@post
-                    }
-                    if (curItem.mediaMetadata.artworkData != null) {
-                        embedLog("skip replace (already has data)")
-                        return@post
-                    }
+                    if (curIdx == C.INDEX_UNSET) return@post
+                    val curItem = player.currentMediaItem ?: return@post
+                    if (curItem.mediaId != mediaId) return@post
+                    if (curItem.mediaMetadata.artworkData != null) return@post
 
                     val newMeta = curItem.mediaMetadata.buildUpon()
                         .setArtworkData(bytes, MediaMetadata.PICTURE_TYPE_FRONT_COVER)
@@ -814,10 +763,8 @@ open class BaseMediaService : MediaLibraryService() {
                         curIdx,
                         curItem.buildUpon().setMediaMetadata(newMeta).build()
                     )
-                    embedLog("replaceMediaItem DONE idx=$curIdx mediaId=$mediaId bytes=${bytes.size} uri=null")
                 }
             } catch (e: Exception) {
-                embedLog("FAILED for $coverArtId: ${e.message}")
                 Log.w(TAG, "embedArt failure", e)
             }
         }

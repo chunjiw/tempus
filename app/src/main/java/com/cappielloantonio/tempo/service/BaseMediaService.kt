@@ -7,7 +7,6 @@ import android.app.TaskStackBuilder
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
-import android.graphics.Bitmap
 import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
@@ -28,9 +27,7 @@ import androidx.media3.session.MediaSession.ControllerInfo
 import androidx.media3.extractor.metadata.icy.IcyInfo
 import androidx.media3.extractor.metadata.id3.TextInformationFrame
 import androidx.media3.extractor.metadata.vorbis.VorbisComment
-import com.bumptech.glide.Glide
 import com.cappielloantonio.tempo.R
-import com.cappielloantonio.tempo.glide.CustomGlideRequest
 import com.cappielloantonio.tempo.repository.QueueRepository
 import com.cappielloantonio.tempo.ui.activity.MainActivity
 import com.cappielloantonio.tempo.util.*
@@ -38,10 +35,8 @@ import com.cappielloantonio.tempo.widget.WidgetUpdateManager
 import com.google.common.collect.ImmutableList
 import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
-import java.io.ByteArrayOutputStream
 import java.net.HttpURLConnection
 import java.net.URL
-import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledExecutorService
 import java.util.concurrent.ScheduledFuture
@@ -91,8 +86,6 @@ open class BaseMediaService : MediaLibraryService() {
     private val radioHeaderCheckRunnable = Runnable {
         checkRadioHttpHeaders()
     }
-
-    private val artworkEmbedExecutor: ExecutorService = Executors.newSingleThreadExecutor()
 
     private val binder = LocalBinder()
 
@@ -187,8 +180,6 @@ open class BaseMediaService : MediaLibraryService() {
                 } else if (mediaType != Constants.MEDIA_TYPE_RADIO) {
                     stopRadioHeaderChecks()
                 }
-
-                embedArtworkForCurrentItem(player, mediaItem)
 
                 updateWidget(player)
             }
@@ -451,7 +442,6 @@ open class BaseMediaService : MediaLibraryService() {
         stopWidgetUpdates()
         stopRadioHeaderChecks()
         radioHeaderCheckExecutor.shutdown()
-        artworkEmbedExecutor.shutdown()
         if (::bitmapLoader.isInitialized) bitmapLoader.shutdown()
         releasePlayers()
         mediaLibrarySession.release()
@@ -716,60 +706,6 @@ open class BaseMediaService : MediaLibraryService() {
         }
     }
 
-    // Embeds the cover art bytes directly on the current MediaItem's MediaMetadata,
-    // on top of the existing content:// URI. This mirrors DSub2000's use of
-    // MediaMetadataCompat.putBitmap(METADATA_KEY_ALBUM_ART, ...) and works around
-    // car Bluetooth stacks (e.g. Tesla) that fail to re-display artwork when two
-    // consecutive tracks share the same artworkUri/handle (issue #470).
-    private fun embedArtworkForCurrentItem(player: Player, mediaItem: MediaItem) {
-        if (player !is ExoPlayer) return
-
-        val extras = mediaItem.mediaMetadata.extras
-        if (extras?.getString("type") == Constants.MEDIA_TYPE_RADIO) return
-
-        val coverArtId = extras?.getString("coverArtId")
-        if (coverArtId.isNullOrEmpty()) return
-
-        if (mediaItem.mediaMetadata.artworkData != null) return
-
-        val mediaId = mediaItem.mediaId
-
-        artworkEmbedExecutor.execute {
-            try {
-                val url = CustomGlideRequest.createUrl(coverArtId, ARTWORK_EMBED_SIZE_PX)
-                val bitmap: Bitmap = Glide.with(applicationContext)
-                    .asBitmap()
-                    .load(url)
-                    .submit(ARTWORK_EMBED_SIZE_PX, ARTWORK_EMBED_SIZE_PX)
-                    .get()
-
-                val baos = ByteArrayOutputStream()
-                bitmap.compress(Bitmap.CompressFormat.JPEG, ARTWORK_EMBED_JPEG_QUALITY, baos)
-                val bytes = baos.toByteArray()
-
-                widgetUpdateHandler.post {
-                    val curIdx = player.currentMediaItemIndex
-                    if (curIdx == C.INDEX_UNSET) return@post
-                    val curItem = player.currentMediaItem ?: return@post
-                    if (curItem.mediaId != mediaId) return@post
-                    if (curItem.mediaMetadata.artworkData != null) return@post
-
-                    val newMeta = curItem.mediaMetadata.buildUpon()
-                        .setArtworkData(bytes, MediaMetadata.PICTURE_TYPE_FRONT_COVER)
-                        .setArtworkUri(null)
-                        .build()
-
-                    player.replaceMediaItem(
-                        curIdx,
-                        curItem.buildUpon().setMediaMetadata(newMeta).build()
-                    )
-                }
-            } catch (e: Exception) {
-                Log.w(TAG, "embedArt failure", e)
-            }
-        }
-    }
-
     private fun attachEqualizerIfPossible(audioSessionId: Int): Boolean {
         if (audioSessionId == 0 || audioSessionId == -1) return false
         val attached = equalizerManager.attachToSession(audioSessionId)
@@ -961,5 +897,3 @@ open class BaseMediaService : MediaLibraryService() {
 
 private const val WIDGET_UPDATE_INTERVAL_MS = 1000L
 private const val RADIO_HEADER_CHECK_INTERVAL_SECONDS = 30L // Reduced frequency - only fallback when ICY fails
-private const val ARTWORK_EMBED_SIZE_PX = 512
-private const val ARTWORK_EMBED_JPEG_QUALITY = 85

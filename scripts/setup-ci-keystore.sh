@@ -39,26 +39,30 @@ fi
 REPO="$(printf '%s' "$ORIGIN_URL" | sed -E 's#.*github\.com[:/]+([^/]+/[^/]+)(\.git)?/?$#\1#' | sed 's#\.git$##')"
 echo ">> Target repo: $REPO ($ORIGIN_URL)"
 
-KEYSTORE_FILE="$(mktemp --suffix=.keystore)"
+KEYSTORE_FILE="$(mktemp --dry-run --suffix=.p12)"
 trap 'rm -f "$KEYSTORE_FILE"' EXIT
 
-# Strip problem chars so passwords are safe to paste/echo everywhere
+# Strip problem chars so the password is safe to paste/echo everywhere
 gen_pass() { openssl rand -base64 32 | tr -d '=+/\n' | cut -c1-32; }
+# PKCS12 stores the key with the store password; reuse one for both.
 KEYSTORE_PASSWORD="$(gen_pass)"
-KEY_PASSWORD="$(gen_pass)"
+KEY_PASSWORD="$KEYSTORE_PASSWORD"
 KEY_ALIAS="ci"
 
-echo ">> Generating keystore (RSA 2048, 30-year validity)"
+echo ">> Generating keystore (PKCS12, RSA 2048, 30-year validity)"
 keytool -genkeypair \
     -keystore "$KEYSTORE_FILE" \
+    -storetype PKCS12 \
     -alias "$KEY_ALIAS" \
     -keyalg RSA \
     -keysize 2048 \
     -validity 10950 \
     -storepass "$KEYSTORE_PASSWORD" \
     -keypass "$KEY_PASSWORD" \
-    -dname "CN=Tempus CI, O=Tempus, C=US" \
-    >/dev/null
+    -dname "CN=Tempus CI, O=Tempus, C=US"
+
+# Sanity-check the keystore is loadable before uploading
+keytool -list -keystore "$KEYSTORE_FILE" -storepass "$KEYSTORE_PASSWORD" >/dev/null
 
 echo ">> Uploading secrets to $REPO"
 base64 -w0 "$KEYSTORE_FILE" | gh secret set KEYSTORE_BASE64 -R "$REPO"

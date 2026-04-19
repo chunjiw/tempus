@@ -73,7 +73,14 @@ jobs:
 
       - name: Decode keystore from secret
         if: steps.skip_check.outputs.skip == 'false'
-        run: echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > /tmp/ci.keystore
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+        run: |
+          printf "%s" "$KEYSTORE_BASE64" | base64 -d > /tmp/ci.keystore
+          # Sanity check — fail fast if the decoded keystore is unusable
+          keytool -list -keystore /tmp/ci.keystore -storepass "$KEYSTORE_PASSWORD" >/dev/null
+          echo "Keystore decoded OK ($(stat -c %s /tmp/ci.keystore) bytes)"
 
       - name: Build tempus release APK
         if: steps.skip_check.outputs.skip == 'false'

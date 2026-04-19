@@ -3,7 +3,12 @@ name: Sync upstream and build signed APK
 on:
   schedule:
     - cron: '0 10 * * *'   # daily 10:00 UTC
-  workflow_dispatch: {}    # initial smoke-test button
+  workflow_dispatch:
+    inputs:
+      force:
+        description: 'Skip the "already current" check and build anyway'
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -31,7 +36,10 @@ jobs:
       - name: Skip if already current
         id: skip_check
         run: |
-          if git merge-base --is-ancestor upstream/main HEAD; then
+          if [ "${{ inputs.force }}" = "true" ]; then
+            echo "force=true; building anyway."
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          elif git merge-base --is-ancestor upstream/main HEAD; then
             echo "Already at or ahead of upstream/main; nothing to do."
             echo "skip=true" >> "$GITHUB_OUTPUT"
           else

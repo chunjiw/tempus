@@ -35,7 +35,9 @@ if [[ "$ORIGIN_URL" == *"eddyizm/tempus"* ]]; then
     echo "  git remote add origin https://github.com/<your-user>/tempus.git" >&2
     exit 1
 fi
-echo ">> Target repo: $ORIGIN_URL"
+# Parse <owner>/<repo> from the origin URL so gh calls don't depend on `gh repo set-default`
+REPO="$(printf '%s' "$ORIGIN_URL" | sed -E 's#.*github\.com[:/]+([^/]+/[^/]+)(\.git)?/?$#\1#' | sed 's#\.git$##')"
+echo ">> Target repo: $REPO ($ORIGIN_URL)"
 
 KEYSTORE_FILE="$(mktemp --suffix=.keystore)"
 trap 'rm -f "$KEYSTORE_FILE"' EXIT
@@ -58,15 +60,15 @@ keytool -genkeypair \
     -dname "CN=Tempus CI, O=Tempus, C=US" \
     >/dev/null
 
-echo ">> Uploading secrets"
-base64 -w0 "$KEYSTORE_FILE" | gh secret set KEYSTORE_BASE64
-printf "%s" "$KEYSTORE_PASSWORD" | gh secret set KEYSTORE_PASSWORD
-printf "%s" "$KEY_PASSWORD"      | gh secret set KEY_PASSWORD
-printf "%s" "$KEY_ALIAS"         | gh secret set KEY_ALIAS
+echo ">> Uploading secrets to $REPO"
+base64 -w0 "$KEYSTORE_FILE" | gh secret set KEYSTORE_BASE64 -R "$REPO"
+printf "%s" "$KEYSTORE_PASSWORD" | gh secret set KEYSTORE_PASSWORD -R "$REPO"
+printf "%s" "$KEY_PASSWORD"      | gh secret set KEY_PASSWORD    -R "$REPO"
+printf "%s" "$KEY_ALIAS"         | gh secret set KEY_ALIAS       -R "$REPO"
 
 echo ""
-echo ">> Secrets registered on $ORIGIN_URL:"
-gh secret list
+echo ">> Secrets registered on $REPO:"
+gh secret list -R "$REPO"
 
 cat <<'EOF'
 

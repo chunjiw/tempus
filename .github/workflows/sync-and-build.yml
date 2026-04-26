@@ -1,0 +1,130 @@
+name: Sync upstream and build signed APK
+
+on:
+  schedule:
+    - cron: '0 10 * * *'   # daily 10:00 UTC
+  workflow_dispatch:
+    inputs:
+      force:
+        description: 'Skip the "already current" check and build anyway'
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  sync-and-build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout tesla-art-patch
+        uses: actions/checkout@v6
+        with:
+          ref: tesla-art-patch
+          fetch-depth: 0
+
+      - name: Configure git identity
+        run: |
+          git config user.name "tempus-ci"
+          git config user.email "tempus-ci@users.noreply.github.com"
+
+      - name: Add upstream and fetch
+        run: |
+          git remote add upstream https://github.com/eddyizm/tempus.git
+          git fetch upstream main
+
+      - name: Skip if already current
+        id: skip_check
+        run: |
+          if [ "${{ inputs.force }}" = "true" ]; then
+            echo "force=true; building anyway."
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          elif git merge-base --is-ancestor upstream/main HEAD; then
+            echo "Already at or ahead of upstream/main; nothing to do."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Rebase onto upstream/main
+        if: steps.skip_check.outputs.skip == 'false'
+        run: |
+          git rebase upstream/main || { git rebase --abort; exit 1; }
+
+      - name: Force-push rebased branch
+        if: steps.skip_check.outputs.skip == 'false'
+        run: git push --force-with-lease origin tesla-art-patch
+
+      - name: Setup JDK 17
+        if: steps.skip_check.outputs.skip == 'false'
+        uses: actions/setup-java@v5
+        with:
+          distribution: 'zulu'
+          java-version: '17'
+
+      - name: Cache Gradle
+        if: steps.skip_check.outputs.skip == 'false'
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*') }}
+
+      - name: Decode keystore from secret
+        if: steps.skip_check.outputs.skip == 'false'
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+        run: |
+          printf "%s" "$KEYSTORE_BASE64" | base64 -d > /tmp/ci.keystore
+          # Sanity check — fail fast if the decoded keystore is unusable
+          keytool -list -keystore /tmp/ci.keystore -storepass "$KEYSTORE_PASSWORD" >/dev/null
+          echo "Keystore decoded OK ($(stat -c %s /tmp/ci.keystore) bytes)"
+
+      - name: Build tempus release APK
+        if: steps.skip_check.outputs.skip == 'false'
+        run: |
+          chmod +x ./gradlew
+          ./gradlew assembleTempusRelease
+
+      - name: Sign and verify APK
+        if: steps.skip_check.outputs.skip == 'false'
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          APKSIGNER="$(ls -1 "$ANDROID_SDK_ROOT"/build-tools/*/apksigner | sort -V | tail -n1)"
+          OUT="app/build/outputs/apk/tempus/release"
+          UNSIGNED="$OUT/app-tempus-arm64-v8a-release-unsigned.apk"
+          SIGNED="$OUT/app-tempus-arm64-v8a-release-signed.apk"
+          "$APKSIGNER" sign \
+              --ks /tmp/ci.keystore \
+              --ks-pass "pass:$KEYSTORE_PASSWORD" \
+              --ks-key-alias "$KEY_ALIAS" \
+              --key-pass "pass:$KEY_PASSWORD" \
+              --out "$SIGNED" "$UNSIGNED"
+          "$APKSIGNER" verify "$SIGNED"
+          echo "APK=$SIGNED" >> "$GITHUB_ENV"
+
+      - name: Compute release metadata
+        if: steps.skip_check.outputs.skip == 'false'
+        id: meta
+        run: |
+          echo "tag=auto-$(date -u +%Y%m%d)-$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+          echo "name=Daily build $(date -u +%Y-%m-%d)" >> "$GITHUB_OUTPUT"
+          echo "upstream_sha=$(git rev-parse upstream/main)" >> "$GITHUB_OUTPUT"
+          echo "upstream_short=$(git rev-parse --short upstream/main)" >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub Release
+        if: steps.skip_check.outputs.skip == 'false'
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ steps.meta.outputs.tag }}
+          name: ${{ steps.meta.outputs.name }}
+          body: |
+            Rebased onto [eddyizm/tempus@${{ steps.meta.outputs.upstream_short }}](https://github.com/eddyizm/tempus/commit/${{ steps.meta.outputs.upstream_sha }}).
+            arm64-v8a signed release. Download the APK below and open on an Android device to install.
+          files: ${{ env.APK }}
+          prerelease: false

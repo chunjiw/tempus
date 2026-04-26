@@ -30,7 +30,7 @@ android {
             enable true
             reset()
             //noinspection ChromeOsAbiSupport
-            include 'armeabi-v7a', 'arm64-v8a'
+            include 'arm64-v8a'
             universalApk false
         }
     }
@@ -47,7 +47,7 @@ android {
     productFlavors {
         tempus {
             dimension = "default"
-            applicationId 'com.eddyizm.tempus'
+            applicationId 'me.keeton.tempus'
         }
 
         degoogled {

@@ -16,4 +16,10 @@
         android:icon="@drawable/ic_add"
         android:title="@string/menu_rate_album"
         app:showAsAction="never" />
+    <item
+        android:id="@+id/action_liked_tracks_only"
+        android:icon="@drawable/ic_favorite"
+        android:title="@string/menu_liked_tracks_only"
+        android:checkable="true"
+        app:showAsAction="never" />
 </menu>

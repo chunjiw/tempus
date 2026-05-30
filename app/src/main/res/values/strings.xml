@@ -49,6 +49,7 @@
     <string name="album_list_page_starred">Starred albums</string>
     <string name="album_list_page_title">Albums</string>
     <string name="album_page_extra_info_button">More like this</string>
+    <string name="album_page_no_liked_tracks">No liked tracks in this album</string>
     <string name="album_page_play_button">Play</string>
     <string name="album_page_release_date_label">Released on %1$s</string>
     <string name="album_page_release_dates_label">Released on %1$s, originally %2$s</string>
@@ -256,6 +257,7 @@
     <string name="menu_edit_playlist_button">Edit playlist</string>
     <string name="menu_download_all_button">Download all</string>
     <string name="menu_rate_album">Rate album</string>
+    <string name="menu_liked_tracks_only">Liked tracks only</string>
     <string name="menu_download_label">Download</string>
     <string name="menu_filter_all">All</string>
     <string name="menu_filter_download">Downloaded</string>

@@ -34,6 +34,7 @@ import com.eddyizm.tempus.model.Download;
 import com.eddyizm.tempus.subsonic.models.AlbumID3;
 import com.eddyizm.tempus.service.MediaManager;
 import com.eddyizm.tempus.service.MediaService;
+import com.eddyizm.tempus.subsonic.models.Child;
 import com.eddyizm.tempus.ui.activity.MainActivity;
 import com.eddyizm.tempus.ui.adapter.SongHorizontalAdapter;
 import com.eddyizm.tempus.ui.dialog.PlaylistChooserDialog;
@@ -51,6 +52,7 @@ import com.google.common.util.concurrent.ListenableFuture;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.List;
 import java.util.Objects;
 import java.util.stream.Collectors;
 
@@ -62,6 +64,8 @@ public class AlbumPageFragment extends Fragment implements ClickCallback {
     private PlaybackViewModel playbackViewModel;
     private SongHorizontalAdapter songHorizontalAdapter;
     private ListenableFuture<MediaBrowser> mediaBrowserListenableFuture;
+    private List<Child> albumSongs = new ArrayList<>();
+    private boolean likedTracksOnly = false;
 
     /** @noinspection deprecation*/
     @Override
@@ -75,6 +79,14 @@ public class AlbumPageFragment extends Fragment implements ClickCallback {
     public void onCreateOptionsMenu(@NonNull Menu menu, @NonNull MenuInflater inflater) {
         super.onCreateOptionsMenu(menu, inflater);
         inflater.inflate(R.menu.album_page_menu, menu);
+    }
+
+    /** @noinspection deprecation*/
+    @Override
+    public void onPrepareOptionsMenu(@NonNull Menu menu) {
+        MenuItem likedOnlyItem = menu.findItem(R.id.action_liked_tracks_only);
+        if (likedOnlyItem != null) likedOnlyItem.setChecked(likedTracksOnly);
+        super.onPrepareOptionsMenu(menu);
     }
 
     @Override
@@ -104,7 +116,6 @@ public class AlbumPageFragment extends Fragment implements ClickCallback {
         initAppBar();
         initAlbumInfoTextButton();
         initAlbumNotes();
-        initMusicButton();
         initBackCover();
         initSongsView();
 
@@ -173,6 +184,12 @@ public class AlbumPageFragment extends Fragment implements ClickCallback {
                 dialog.setArguments(bundle);
                 dialog.show(requireActivity().getSupportFragmentManager(), null);
             });
+            return true;
+        }
+        if (item.getItemId() == R.id.action_liked_tracks_only) {
+            likedTracksOnly = !likedTracksOnly;
+            item.setChecked(likedTracksOnly);
+            refreshSongList();
             return true;
         }
 
@@ -318,26 +335,43 @@ public class AlbumPageFragment extends Fragment implements ClickCallback {
         });
     }
 
-    private void initMusicButton() {
-        albumPageViewModel.getAlbumSongLiveList().observe(getViewLifecycleOwner(), songs -> {
-            if (bind != null && !songs.isEmpty()) {
-                bind.albumPagePlayButton.setOnClickListener(v -> {
-                    MediaManager.startQueue(mediaBrowserListenableFuture, songs, 0);
-                    activity.setBottomSheetInPeek(true);
-                });
+    private List<Child> getVisibleSongs() {
+        if (!likedTracksOnly) return albumSongs;
+        return albumSongs.stream()
+                .filter(song -> song.getStarred() != null)
+                .collect(Collectors.toList());
+    }
 
-                bind.albumPageShuffleButton.setOnClickListener(v -> {
-                    Collections.shuffle(songs);
-                    MediaManager.startQueue(mediaBrowserListenableFuture, songs, 0);
-                    activity.setBottomSheetInPeek(true);
-                });
-            }
+    private void refreshSongList() {
+        if (bind == null) return;
 
-            if (bind != null && songs.isEmpty()) {
-                bind.albumPagePlayButton.setEnabled(false);
-                bind.albumPageShuffleButton.setEnabled(false);
-            }
-        });
+        List<Child> visibleSongs = getVisibleSongs();
+
+        if (songHorizontalAdapter != null) {
+            songHorizontalAdapter.setItems(visibleSongs);
+            reapplyPlayback();
+        }
+
+        boolean hasSongs = !visibleSongs.isEmpty();
+
+        boolean showEmptyState = likedTracksOnly && !hasSongs;
+        bind.emptySongListTextView.setVisibility(showEmptyState ? View.VISIBLE : View.GONE);
+        bind.songRecyclerView.setVisibility(showEmptyState ? View.GONE : View.VISIBLE);
+
+        bind.albumPagePlayButton.setEnabled(hasSongs);
+        bind.albumPageShuffleButton.setEnabled(hasSongs);
+
+        bind.albumPagePlayButton.setOnClickListener(hasSongs ? v -> {
+            MediaManager.startQueue(mediaBrowserListenableFuture, visibleSongs, 0);
+            activity.setBottomSheetInPeek(true);
+        } : null);
+
+        bind.albumPageShuffleButton.setOnClickListener(hasSongs ? v -> {
+            List<Child> shuffled = new ArrayList<>(visibleSongs);
+            Collections.shuffle(shuffled);
+            MediaManager.startQueue(mediaBrowserListenableFuture, shuffled, 0);
+            activity.setBottomSheetInPeek(true);
+        } : null);
     }
 
     private void initBackCover() {
@@ -388,8 +422,8 @@ public class AlbumPageFragment extends Fragment implements ClickCallback {
                 reapplyPlayback();
 
                 albumPageViewModel.getAlbumSongLiveList().observe(getViewLifecycleOwner(), songs -> {
-                    songHorizontalAdapter.setItems(songs);
-                    reapplyPlayback();
+                    albumSongs = songs != null ? songs : new ArrayList<>();
+                    refreshSongList();
                 });
             }
         });

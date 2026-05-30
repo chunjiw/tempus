@@ -287,5 +287,20 @@
             android:paddingTop="8dp"
             android:paddingBottom="@dimen/global_padding_bottom"
             app:layout_behavior="@string/appbar_scrolling_view_behavior"/>
+
+        <TextView
+            android:id="@+id/empty_song_list_text_view"
+            style="@style/BodyMedium"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="18dp"
+            android:layout_marginEnd="18dp"
+            android:paddingTop="32dp"
+            android:paddingBottom="32dp"
+            android:gravity="center"
+            android:text="@string/album_page_no_liked_tracks"
+            android:textAlignment="center"
+            android:visibility="gone"
+            app:layout_behavior="@string/appbar_scrolling_view_behavior" />
     </androidx.coordinatorlayout.widget.CoordinatorLayout>
 </LinearLayout>

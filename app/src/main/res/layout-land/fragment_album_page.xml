@@ -301,5 +301,20 @@
             android:paddingTop="8dp"
             android:paddingBottom="75dp" />
 
+        <TextView
+            android:id="@+id/empty_song_list_text_view"
+            style="@style/BodyMedium"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:paddingStart="18dp"
+            android:paddingEnd="18dp"
+            android:paddingTop="32dp"
+            android:paddingBottom="32dp"
+            android:gravity="center"
+            android:text="@string/album_page_no_liked_tracks"
+            android:textAlignment="center"
+            android:visibility="gone" />
+
     </LinearLayout>
 </LinearLayout>

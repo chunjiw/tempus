@@ -184,6 +184,10 @@ open class BaseMediaService : MediaLibraryService() {
                     stopRadioHeaderChecks()
                 }
 
+                // Keep the AVRCP artwork cache aligned with the new play position
+                // so the upcoming tracks are warm before their own transitions.
+                prewarmArtworkWindow(player)
+
                 updateWidget(player)
             }
 
@@ -195,11 +199,7 @@ open class BaseMediaService : MediaLibraryService() {
                     Log.w(TAG, "prefetchQueueGains failed: $t")
                 }
                 if (timeline.isEmpty) return
-                val window = Timeline.Window()
-                for (i in 0 until timeline.windowCount) {
-                    timeline.getWindow(i, window)
-                    window.mediaItem.mediaMetadata.artworkUri?.let { bitmapLoader.prewarm(it) }
-                }
+                prewarmArtworkWindow(player)
             }
 
             override fun onTracksChanged(tracks: Tracks) {
@@ -420,6 +420,50 @@ open class BaseMediaService : MediaLibraryService() {
         })
         if (player.isPlaying) {
             scheduleWidgetUpdates()
+        }
+    }
+
+    /**
+     * Prewarm album-art bitmaps for a small window around the current play
+     * position instead of the whole queue. The SyncBitmapLoader cache is a
+     * fixed-size LRU; prewarming the entire queue in timeline-index order fills
+     * it with the tail of the playlist and evicts the covers we are about to
+     * play, which makes the issue #470 null-bitmap symptom reappear on long or
+     * shuffled queues. Warming only current + look-ahead (walked in play order,
+     * honoring shuffle/repeat) keeps the cache aligned with playback so each
+     * upcoming track is a synchronous cache hit at its transition.
+     */
+    private fun prewarmArtworkWindow(player: Player) {
+        val timeline = player.currentTimeline
+        if (timeline.isEmpty) return
+        val current = player.currentMediaItemIndex
+        if (current == C.INDEX_UNSET) return
+
+        val repeatMode = player.repeatMode
+        val shuffle = player.shuffleModeEnabled
+
+        // Ordered so the current cover is dispatched first, then look-ahead in
+        // play order, then the previous track (for skip-back). LinkedHashSet
+        // dedupes wrap-around / repeat-one while preserving that order.
+        val indices = LinkedHashSet<Int>()
+        indices.add(current)
+
+        var ahead = current
+        var count = 0
+        while (count < ARTWORK_PREWARM_AHEAD) {
+            ahead = timeline.getNextWindowIndex(ahead, repeatMode, shuffle)
+            if (ahead == C.INDEX_UNSET) break
+            indices.add(ahead)
+            count++
+        }
+
+        val prev = timeline.getPreviousWindowIndex(current, repeatMode, shuffle)
+        if (prev != C.INDEX_UNSET) indices.add(prev)
+
+        val window = Timeline.Window()
+        for (i in indices) {
+            timeline.getWindow(i, window)
+            window.mediaItem.mediaMetadata.artworkUri?.let { bitmapLoader.prewarm(it) }
         }
     }
 
@@ -849,3 +893,7 @@ open class BaseMediaService : MediaLibraryService() {
 
 private const val WIDGET_UPDATE_INTERVAL_MS = 1000L
 private const val RADIO_HEADER_CHECK_INTERVAL_SECONDS = 30L // Reduced frequency - only fallback when ICY fails
+// Number of upcoming tracks (in play order) whose artwork is prewarmed around
+// the current position. Window size is this + current + 1 previous, well under
+// the SyncBitmapLoader LRU capacity so the warm set is never self-evicting.
+private const val ARTWORK_PREWARM_AHEAD = 4

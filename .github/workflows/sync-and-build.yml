@@ -17,10 +17,10 @@ jobs:
   sync-and-build:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout tesla-art-patch
+      - name: Checkout tempus-custom
         uses: actions/checkout@v6
         with:
-          ref: tesla-art-patch
+          ref: tempus-custom
           fetch-depth: 0
 
       - name: Configure git identity
@@ -53,7 +53,7 @@ jobs:
 
       - name: Force-push rebased branch
         if: steps.skip_check.outputs.skip == 'false'
-        run: git push --force-with-lease origin tesla-art-patch
+        run: git push --force-with-lease origin tempus-custom
 
       - name: Setup JDK 17
         if: steps.skip_check.outputs.skip == 'false'

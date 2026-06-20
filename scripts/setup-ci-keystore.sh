@@ -83,13 +83,13 @@ One more manual step, if you haven't already: enable Actions on the fork.
   → "Allow all actions and reusable workflows"
 
 Then smoke-test:
-  git push origin tesla-art-patch       # make sure the workflow file is on the branch
+  git push origin tempus-custom       # make sure the workflow file is on the branch
   gh workflow run sync-and-build.yml
   gh run watch
 
 Notes
-- `tesla-art-patch` is now effectively CI-owned: the workflow force-pushes
+- `tempus-custom` is now effectively CI-owned: the workflow force-pushes
   rebased history to origin daily. Keep new local work on feature branches
-  off tesla-art-patch, and push anything you do want preserved before the
+  off tempus-custom, and push anything you do want preserved before the
   next CI run.
 EOF

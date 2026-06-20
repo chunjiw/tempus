@@ -107,12 +107,25 @@ open class BaseMediaService : MediaLibraryService() {
 
     fun updateMediaItems(player: Player) {
         Log.d(TAG, "update items")
-        val n = player.mediaItemCount
-        val k = player.currentMediaItemIndex
-        val current = player.currentPosition
-        val items = (0..n - 1).map { MappingUtil.mapMediaItem(player.getMediaItemAt(it)) }
-        player.clearMediaItems()
-        player.setMediaItems(items, k, current)
+        // Re-resolve stream URLs (per-network bitrate/format) for the queue WITHOUT
+        // disturbing the currently-playing track. Replacing the live item — or doing
+        // clearMediaItems()/setMediaItems() over it — discards its forward buffer and
+        // forces a re-prepare, which is an audible ~0.5s gap on every WiFi<->cellular
+        // switch. So we skip the current index entirely and only replaceMediaItem() the
+        // others, and only when the resolved URI actually changed (a no-op when the WiFi
+        // and mobile bitrate/format settings match, and for downloaded/local items whose
+        // URI is unchanged). Upcoming tracks thus adapt to the new network at their
+        // transition; the active track finishes at its enqueue-time bitrate.
+        val current = player.currentMediaItemIndex
+        if (current == C.INDEX_UNSET) return
+        for (i in 0 until player.mediaItemCount) {
+            if (i == current) continue
+            val old = player.getMediaItemAt(i)
+            val mapped = MappingUtil.mapMediaItem(old)
+            if (mapped.requestMetadata.mediaUri != old.requestMetadata.mediaUri) {
+                player.replaceMediaItem(i, mapped)
+            }
+        }
     }
 
     fun restorePlayerFromQueue(player: Player) {
@@ -916,6 +929,10 @@ open class BaseMediaService : MediaLibraryService() {
             val isWifi = networkCapabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)
             if (isWifi != wasWifi) {
                 wasWifi = isWifi
+                // Re-resolve per-network stream URLs for the queue on an actual transport
+                // flip. updateMediaItems() only replaces non-current items, so this no
+                // longer interrupts the playing track (no ~0.5s rebuffer gap) while still
+                // letting upcoming tracks adapt to the new network's bitrate/format.
                 widgetUpdateHandler.post {
                     updateMediaItems(mediaLibrarySession.player)
                 }

@@ -98,7 +98,12 @@ jobs:
           APKSIGNER="$(ls -1 "$ANDROID_SDK_ROOT"/build-tools/*/apksigner | sort -V | tail -n1)"
           OUT="app/build/outputs/apk/tempus/release"
           UNSIGNED="$OUT/app-tempus-arm64-v8a-release-unsigned.apk"
-          SIGNED="$OUT/app-tempus-arm64-v8a-release-signed.apk"
+          # Version the signed APK so downloaded files never collide across releases.
+          # versionName comes from upstream after the daily rebase; the short SHA keeps
+          # the name unique even when two builds share the same version.
+          VERSION="$(awk -F\' '/versionName/{print $2; exit}' app/build.gradle)"
+          VERSION="${VERSION:-unknown}"
+          SIGNED="$OUT/tempus-${VERSION}-$(date -u +%Y%m%d)-$(git rev-parse --short HEAD)-arm64-v8a.apk"
           "$APKSIGNER" sign \
               --ks /tmp/ci.keystore \
               --ks-pass "pass:$KEYSTORE_PASSWORD" \

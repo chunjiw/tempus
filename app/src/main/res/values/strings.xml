@@ -425,7 +425,7 @@
     <string name="server_unreachable_dialog_negative_button">Cancel</string>
     <string name="server_unreachable_dialog_neutral_button">Go to login</string>
     <string name="server_unreachable_dialog_positive_button">Continue anyway</string>
-    <string name="server_unreachable_dialog_summary">The requested server is unavailable. If you choose to continue this dialog will not appear for the next hour.</string>
+    <string name="server_unreachable_dialog_summary">The requested server is unavailable. If you choose to continue this dialog will not appear for the next 24 hours.</string>
     <string name="server_unreachable_dialog_title">Server unreachable</string>
     <string name="settings_about_summary">Tempus is an open source and lightweight music client for Subsonic, designed and built natively for Android.</string>
     <string name="settings_about_title">About</string>

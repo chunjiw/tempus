@@ -15,6 +15,8 @@ import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Parcel;
+import android.os.Handler;
+import android.os.Looper;
 import android.text.TextUtils;
 import android.util.Log;
 import android.view.View;
@@ -28,6 +30,8 @@ import androidx.core.splashscreen.SplashScreen;
 import androidx.core.view.ViewCompat;
 import androidx.core.view.WindowInsetsCompat;
 import androidx.drawerlayout.widget.DrawerLayout;
+import androidx.fragment.app.DialogFragment;
+import androidx.fragment.app.Fragment;
 import androidx.fragment.app.FragmentManager;
 import androidx.lifecycle.Lifecycle;
 import androidx.lifecycle.LiveData;
@@ -67,6 +71,7 @@ import com.eddyizm.tempus.util.AlbumArtistBackfill;
 import com.eddyizm.tempus.util.DownloadRepair;
 import com.eddyizm.tempus.repository.PlaylistRepository;
 import com.eddyizm.tempus.util.ConnectionUtil;
+import com.eddyizm.tempus.util.NetworkUtil;
 import com.eddyizm.tempus.util.Preferences;
 import com.eddyizm.tempus.viewmodel.MainViewModel;
 import com.eddyizm.tempus.util.FavoriteRegistry;
@@ -107,6 +112,11 @@ public class MainActivity extends BaseActivity {
     ConnectivityStatusBroadcastReceiver connectivityStatusBroadcastReceiver;
     private Intent pendingDownloadPlaybackIntent;
     private boolean pendingOpenNowPlaying = false;
+
+    private static final String SERVER_UNREACHABLE_DIALOG_TAG = "server_unreachable_dialog";
+    private static final long PING_CONFIRM_DELAY_MS = 3000L;
+    private final Handler mainHandler = new Handler(Looper.getMainLooper());
+    private boolean serverUnreachableConfirmPending = false;
 
     public ActivityMainBinding getBinding() {
         return bind;
@@ -214,6 +224,7 @@ public class MainActivity extends BaseActivity {
         connectivityStatusReceiverManager(false);
         if (isFinishing()) PlaylistRepository.resetKeptSync();
         if (!isChangingConfigurations()) ConnectionUtil.expirePingDeferral();
+        mainHandler.removeCallbacksAndMessages(null);
         bind = null;
     }
 
@@ -653,14 +664,12 @@ public class MainActivity extends BaseActivity {
                     if (subsonicResponse == null) {
                         // A local address answered since, so this failure is stale. It matters
                         // because one of the dialog's buttons clears the session and the queue.
-                        if (Preferences.isInUseServerAddressLocal() || outstandingProbe != null) return;
+                        if (isRemotePingFailureStale()) return;
 
-                        if (Preferences.showServerUnreachableDialog()) {
-                            ServerUnreachableDialog dialog = new ServerUnreachableDialog();
-                            dialog.show(getSupportFragmentManager(), null);
-                        }
+                        if (Preferences.showServerUnreachableDialog()) confirmServerUnreachable();
                     } else {
                         Preferences.setOpenSubsonic(subsonicResponse.getOpenSubsonic() != null && subsonicResponse.getOpenSubsonic());
+                        dismissServerUnreachableDialog();
                     }
                 });
             }
@@ -749,6 +758,63 @@ public class MainActivity extends BaseActivity {
                 ConnectionAlertDialog dialog = new ConnectionAlertDialog();
                 dialog.show(getSupportFragmentManager(), null);
             }
+        }
+    }
+
+    // A single ping fired the instant the app is foregrounded (onStart + onResume) often
+    // fails on a transient blip while connectivity is still settling (device wake, Wi-Fi
+    // reconnect, Wi-Fi<->cellular handoff). Don't alarm on that: wait a short grace, and
+    // only show the modal if the device still has a validated network AND a confirmation
+    // ping also fails. A genuine sustained outage still surfaces the dialog, just ~3s later.
+    private void confirmServerUnreachable() {
+        if (serverUnreachableConfirmPending) return; // collapse the onStart + onResume double-ping
+        serverUnreachableConfirmPending = true;
+        mainHandler.postDelayed(() -> {
+            if (isFinishing() || isDestroyed() || bind == null) {
+                serverUnreachableConfirmPending = false;
+                return;
+            }
+            // No validated internet -> device-side, still settling. The offline banner already
+            // covers this; it isn't the server's fault, so stay silent.
+            if (NetworkUtil.isOffline()) {
+                serverUnreachableConfirmPending = false;
+                return;
+            }
+            // The local network prompt opened during the grace; answering it pings again.
+            if (isLocalNetworkRequestOpen()) {
+                serverUnreachableConfirmPending = false;
+                return;
+            }
+            mainViewModel.ping().observe(this, confirm -> {
+                serverUnreachableConfirmPending = false;
+                if (confirm == null) {
+                    maybeShowServerUnreachableDialog();
+                } else {
+                    Preferences.setOpenSubsonic(confirm.getOpenSubsonic() != null && confirm.getOpenSubsonic());
+                    dismissServerUnreachableDialog();
+                }
+            });
+        }, PING_CONFIRM_DELAY_MS);
+    }
+
+    // A local address can answer, or a probe start, while the confirmation is out.
+    private boolean isRemotePingFailureStale() {
+        return Preferences.isInUseServerAddressLocal() || outstandingProbe != null;
+    }
+
+    private void maybeShowServerUnreachableDialog() {
+        if (isFinishing() || isDestroyed()) return;
+        if (isRemotePingFailureStale()) return;
+        if (!Preferences.showServerUnreachableDialog()) return;
+        FragmentManager fm = getSupportFragmentManager();
+        if (fm.findFragmentByTag(SERVER_UNREACHABLE_DIALOG_TAG) != null) return; // never stack
+        new ServerUnreachableDialog().show(fm, SERVER_UNREACHABLE_DIALOG_TAG);
+    }
+
+    private void dismissServerUnreachableDialog() {
+        Fragment fragment = getSupportFragmentManager().findFragmentByTag(SERVER_UNREACHABLE_DIALOG_TAG);
+        if (fragment instanceof DialogFragment) {
+            ((DialogFragment) fragment).dismissAllowingStateLoss();
         }
     }
 
